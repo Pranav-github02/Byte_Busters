@@ -62,7 +62,7 @@ def check_anomaly(request):
 
     samtest = dataonerow[features1]
     anomaly_score = 0
-    with open('./AnomalyDetection/main.pkl', 'rb') as file:
+    with open('./AnomalyDetection/model.pkl', 'rb') as file:
         model = pickle.load(file)
     sampredict = model.predict(samtest)
     anomaly_score = model.decision_function(samtest)
