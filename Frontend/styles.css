@@ -1,0 +1,61 @@
+/* Styles for the form container */
+.form-container {
+  display: flex;
+}
+
+form {
+  flex: 1;
+  max-width: 400px;
+  margin-right: 20px;
+  padding: 20px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+}
+
+/* Styles for the form labels */
+label {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: bold;
+}
+
+/* Styles for the form inputs */
+input[type="text"],
+input[type="checkbox"] {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  box-sizing: border-box;
+  margin-bottom: 10px;
+}
+
+input[type="submit"] {
+  background-color: #4CAF50;
+  color: white;
+  padding: 10px 15px;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+input[type="submit"]:hover {
+  background-color: #45a049;
+}
+
+.result-area {
+  flex: 1;
+  background-color: #f1f1f1;
+  padding: 20px;
+}
+
+@media screen and (max-width: 600px) {
+  .form-container {
+    flex-direction: column;
+  }
+
+  form {
+    margin-right: 0;
+    margin-bottom: 20px;
+  }
+}
