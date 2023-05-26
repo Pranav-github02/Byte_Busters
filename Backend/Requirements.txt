@@ -4,3 +4,4 @@ djangorestframework
 numpy
 pandas
 pyarrow
+scikit-learn
