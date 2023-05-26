@@ -3,5 +3,6 @@ django-cors-headers
 djangorestframework
 numpy
 pandas
-pyarrow
+keras
 scikit-learn
+geoip2
