@@ -1,27 +1,25 @@
 import ast
-import ipaddress
-import numpy as np
-import pandas as pd
-from datetime import datetime
-import pickle
 from rest_framework.decorators import api_view
 from django.http import JsonResponse
+from datetime import datetime
+import pandas as pd
+import numpy as np
+import pickle
+import ipaddress
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 
 
 @api_view(['POST'])
-def check_anomaly(request):
+def check_anomaly(record):
     # If receiving data from browser
-    # datalist=request.data
+    # datalist=record.data
 
     # If receiving data from postman
-    dataline = request.data.get('data')
+    dataline = record.data.get('data')
     datalist = ast.literal_eval(dataline)
-
-    columns = [
-        'Login Timestamp', 'User ID', 'IP Address', 'Country', 'Region', 'City',
-        'Browser Name and Version', 'Device Type', 'Login Successful'
-    ]
-
+    # Preprocess the input record
+    attributes = ['Login Timestamp', 'User ID', 'IP Address', 'Country', 'Region', 'City', 'Browser Name and Version',
+                  'Device Type', 'Login Successful']
     expected_columns = [
         'loginTimestamp', 'userID', 'ipAddress', 'country', 'region', 'city',
         'browserName', 'deviceType', 'loginSuccessful'
@@ -42,36 +40,33 @@ def check_anomaly(request):
     # If the data contains column names, use them to create the DataFrame
     if isinstance(datalist, dict) and set(expected_columns).issubset(datalist.keys()):
         mapped_datalist = {feature_mapping.get(key, key): value for key, value in datalist.items()}
-        # dataonerow = pd.DataFrame([mapped_datalist])
     else:
         # If the data doesn't contain column names, assume it's a list and create the DataFrame
-        # dataonerow = pd.DataFrame([datalist], columns=columns)
-        mapped_datalist = {columns[i]: datalist[i] for i in range(len(columns))}
+        mapped_datalist = {attributes[i]: datalist[i] for i in range(len(attributes))}
 
-    # dataonerow = pd.DataFrame([datalist], columns=columns)
-    dataonerow = pd.DataFrame([mapped_datalist], columns=columns)
+    df = pd.DataFrame([mapped_datalist], columns=attributes)
+    df['Login Timestamp'] = pd.to_datetime(df['Login Timestamp'], format='%d/%m/%Y %H:%M:%S')
+    df['Login Timestamp'] = df['Login Timestamp'].apply(lambda x: datetime.timestamp(x))
+    df['IP Address'] = df['IP Address'].apply(lambda x: int(ipaddress.ip_address(x)))
+    categorical_columns = ['Country', 'Region', 'City', 'Browser Name and Version', 'Device Type']
 
-    dataonerow['Login Timestamp'] = pd.to_datetime(dataonerow['Login Timestamp'], format='%m-%d-%Y %I.%M.%S %p')
-    dataonerow['Login Timestamp'] = dataonerow['Login Timestamp'].apply(lambda x: datetime.timestamp(x))
-    dataonerow['IP Address'] = dataonerow['IP Address'].apply(lambda x: int(ipaddress.ip_address(x)))
+    for column in categorical_columns:
+        label_encoder = LabelEncoder()
+        df[column] = label_encoder.fit_transform(df[column])
 
-    features1 = ['Login Timestamp', 'User ID', 'IP Address', 'Login Successful']
-    categorical_features1 = ['Country', 'Region', 'City', 'Browser Name and Version', 'Device Type']
+    Z = df.values
 
-    dataonerow = pd.get_dummies(dataonerow, columns=categorical_features1)
+    scaler = StandardScaler()
+    Z = scaler.fit_transform(Z)
+    Z = np.reshape(Z, (Z.shape[0], 1, Z.shape[1]))
 
-    samtest = dataonerow[features1]
-    anomaly_score = 0
     with open('./AnomalyDetection/model.pkl', 'rb') as file:
         model = pickle.load(file)
-    sampredict = model.predict(samtest)
-    anomaly_score = model.decision_function(samtest)
-    print(f"Anomaly score: {anomaly_score[0]}")
+    # Predict the anomaly using the trained model
+    prediction = model.predict(Z)
+    predicted_value = np.round(prediction).flatten().astype(int)
 
-    if sampredict[0] == 1:
+    if predicted_value == 0:
         return JsonResponse({"result": "Not an Anomaly"})
     else:
-        print("Anomaly detected. The features responsible for the anomaly are:")
-        features_imp = np.array(samtest.columns)[anomaly_score[0] < 0]
-        print(features_imp)
         return JsonResponse({"result": "Anomaly"})

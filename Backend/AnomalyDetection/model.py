@@ -1,64 +1,113 @@
-import ipaddress
-import numpy as np
-import pandas as pd
-from sklearn.ensemble import IsolationForest
 from datetime import datetime
+import pandas as pd
+import numpy as np
+import geoip2.database
+from keras.models import Sequential
 import pickle
+import ipaddress
+from keras.layers import LSTM, Dense
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 
-# Set the file path
-# Update the file path without double quotes
-file_path = '..........'
 
-# Create an instance of the Isolation Forest model
-model = IsolationForest(contamination=0.1)  # Adjust the contamination parameter as needed
 
-chunk_size = 10000
+def get_geolocation(ip_address):
+    reader = geoip2.database.Reader('C:/Users/anike/Downloads/GeoLite2-City_20230523/GeoLite2-City_20230523/GeoLite2-City.mmdb')
+    try:
+        response = reader.city(ip_address)
+        country_code = response.country.iso_code
+        return country_code
+    except geoip2.errors.AddressNotFoundError:
+        return None
+    finally:
+        reader.close()
 
-# Read the dataset
-data = pd.read_csv(file_path)
 
-# Select the features for anomaly detection
-features = ['Login Timestamp', 'User ID', 'IP Address', 'Login Successful']
-categorical_features = ['Country', 'Region', 'City', 'Browser Name and Version', 'Device Type']
+def check_compatibility(browser, device_type):
+    if browser.startswith('Firefox'):
+        return device_type
+    elif browser.startswith('Chrome Mobile') and device_type in ['mobile', 'tablet']:
+        return device_type
+    elif browser.startswith('Android') and device_type in ['mobile', 'tablet']:
+        return device_type
+    elif browser.startswith('Chrome Mobile WebView') and device_type == 'mobile':
+        return device_type
+    elif browser.startswith('Chrome') and device_type == 'desktop':
+        return device_type
+    elif browser.startswith('Opera') and device_type in ['desktop', 'mobile', 'tablet']:
+        return device_type
+    elif browser.startswith('MiuiBrowser') and device_type == 'mobile':
+        return device_type
+    elif browser.startswith('UC Browser') and device_type in ['mobile', 'tablet']:
+        return device_type
+    elif browser.startswith('Snapchat') and device_type == 'mobile':
+        return device_type
+    elif browser.startswith('Samsung Internet') and device_type in ['mobile', 'tablet']:
+        return device_type
+    elif browser.startswith('Safari') and device_type in ['mobile', 'tablet']:
+        return device_type
+    elif browser.startswith('Opera Mini') and device_type == 'mobile':
+        return device_type
+    elif browser.startswith('Opera Mobile') and device_type in ['mobile', 'tablet']:
+        return device_type
+    else:
+        return 'Incompatible'
 
-# Prepare an empty DataFrame to store the processed chunks
-processed_data = pd.DataFrame()
 
-for chunk in pd.read_csv(file_path, chunksize=chunk_size):
-    # Extract the selected features from the chunk
-    X = chunk[features].copy()
 
-    # Convert 'Login Timestamp' to UNIX timestamp
-    X['Login Timestamp'] = pd.to_datetime(X['Login Timestamp'])
-    X['Login Timestamp'] = X['Login Timestamp'].apply(lambda x: datetime.timestamp(x))
 
-    # Convert 'IP Address' to integer representation
-    X['IP Address'] = X['IP Address'].apply(lambda x: int(ipaddress.ip_address(x)))
+# Define batch size and initialize the LSTM model
+batch_size = 50000
+model = Sequential()
+model.add(LSTM(64, input_shape=(1, 9)))
+model.add(Dense(1, activation='sigmoid'))
+model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
 
-    # Append the processed chunk to the overall processed data
-    processed_data = pd.concat([processed_data, X], ignore_index=True)
+total_samples = 0
+correct_predictions = 0
+# Preprocess the dataset and train the model in batches
+for chunk in pd.read_csv('C:/Users/anike/Downloads/Chitkara_Anomaly_Detection/Chitkara_Anomaly_Detection/Login_Data.csv', chunksize=batch_size):
+    # Preprocess the chunk
+    chunk['IPtoCountry'] = chunk['IP Address'].apply(lambda ip: get_geolocation(ip))
+    chunk['Compatibility'] = chunk.apply(lambda row: check_compatibility(row['Browser Name and Version'], row['Device Type']), axis=1)
+    chunk['Temp_label'] = np.where((chunk['IPtoCountry'] != chunk['Country']) | (chunk['Compatibility'] != chunk['Device Type']), 1, 0)
+    chunk['Login_bin'] = chunk['Login Successful'].astype(int)
+    chunk['Label_f'] = np.logical_not(chunk['Temp_label'] ^ chunk['Login_bin']).astype(int)
 
-# Fit the model to the processed data
-model.fit(processed_data)
+    chunk = chunk.drop(['Compatibility', 'IPtoCountry', 'Temp_label', 'Login_bin'], axis=1)
+    chunk['Login Timestamp'] = pd.to_datetime(chunk['Login Timestamp'])
+    chunk['Login Timestamp'] = chunk['Login Timestamp'].apply(lambda x: datetime.timestamp(x))
+    chunk['IP Address'] = chunk['IP Address'].apply(lambda x: int(ipaddress.ip_address(x)))
 
-# Prepare the data for anomaly prediction
-data_copy = data.copy()
-data_copy['Login Timestamp'] = pd.to_datetime(data_copy['Login Timestamp'])
-data_copy['Login Timestamp'] = data_copy['Login Timestamp'].apply(lambda x: datetime.timestamp(x))
-data_copy['IP Address'] = data_copy['IP Address'].apply(lambda x: int(ipaddress.ip_address(x)))
+    # print(chunk)
 
-# Encode categorical columns with label encoding
-for feature in categorical_features:
-    data_copy[feature] = pd.factorize(data_copy[feature])[0]
+    categorical_columns = ['Country', 'Region', 'City', 'Browser Name and Version', 'Device Type']
+    # Perform label encoding on each categorical column
+    for column in categorical_columns:
+          label_encoder = LabelEncoder()
+          chunk[column] = label_encoder.fit_transform(chunk[column])
 
-# Predict the anomalies (1 for normal, -1 for anomalies)
-predictions = model.predict(data_copy[features])
 
-# Add the anomaly predictions to the original dataset
-data['Anomaly'] = predictions
+    temp = chunk
+    temp = temp.drop(['Label_f'], axis=1)
+    X = temp.values
+    y = chunk['Label_f']
 
-# Save the trained model
+    scaler = StandardScaler()
+    X = scaler.fit_transform(X)
+    X = np.reshape(X, (X.shape[0], 1, X.shape[1]))
+    # Train the model on the chunk
+    model.fit(X, y, epochs=50, batch_size=25, verbose=0)
+    # Evaluate the accuracy on the chunk
+    predictions = model.predict(X)
+    predicted_labels = np.round(predictions).flatten()
+    correct_predictions += np.sum(predicted_labels == y)
+    total_samples += len(y)
+
+# Calculate accuracy
+accuracy = correct_predictions / total_samples
+print("Accuracy:", accuracy)
+
+
+
 with open('model.pkl', 'wb') as file:
     pickle.dump(model, file)
-
-
